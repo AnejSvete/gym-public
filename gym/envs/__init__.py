@@ -91,6 +91,20 @@ register(
     max_episode_steps=500,
 )
 
+register(
+    id='CartPoleExtended-v0',
+    entry_point='gym.envs.classic_control:CartPoleExtendedEnv',
+    max_episode_steps=200,
+    reward_threshold=195.0,
+)
+
+register(
+    id='MountainCarExtended-v0',
+    entry_point='gym.envs.classic_control:MountainCarExtendedEnv',
+    max_episode_steps=10000,
+    reward_threshold=-110.0,
+)
+
 # Box2d
 # ----------------------------------------
 
