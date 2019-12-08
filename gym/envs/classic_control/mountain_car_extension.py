@@ -1,5 +1,3 @@
-import math
-
 import numpy as np
 from scipy.constants import g, pi
 
@@ -39,6 +37,8 @@ class MountainCarExtendedEnv(gym.Env):
         ######################################################################
         self.mass_car = 1.0
         self.mass_pole = 0.1
+        self.car_width = 80
+        self.car_height = 40
         self.total_mass = self.mass_pole + self.mass_car
         self.length = 0.25  # actually half the pole's length
         self.pole_mass_length = self.mass_pole * self.length
@@ -53,38 +53,46 @@ class MountainCarExtendedEnv(gym.Env):
         self.np_random, seed = seeding.np_random(seed)
         return [seed]
 
-    def theta_acc(self, theta, theta_dot, force):
-        cos_theta = math.cos(theta)
-        sin_theta = math.sin(theta)
-        theta_dot_dot = ((self.gravity * sin_theta * self.total_mass - cos_theta *
-                          (force + self.pole_mass_length * theta_dot * theta_dot * sin_theta)) /
+    def height(self, t):
+        return 0.45 * np.sin(3 * t) + 0.55
+
+    def dheight(self, t):
+        return 3 * 0.45 * np.cos(3 * t)
+
+    def theta_acc(self, x, theta, theta_dot, force):
+        cos_theta, sin_theta = np.cos(theta), np.sin(theta)
+        theta_dot_dot = ((g * self.dheight(x) * sin_theta * self.total_mass -
+                          cos_theta * (force + self.pole_mass_length * theta_dot * theta_dot * sin_theta)) /
                          (self.length * (4.0 / 3.0 * self.total_mass - self.mass_pole * cos_theta * cos_theta)))
         return theta_dot_dot
 
     def x_acc(self, theta, theta_dot, theta_dot_dot, force):
-        cos_theta = math.cos(theta)
-        sin_theta = math.sin(theta)
-        x_dot_dot = ((force + self.pole_mass_length * theta_dot * theta_dot * sin_theta) / self.total_mass -
-                     self.pole_mass_length * theta_dot_dot * cos_theta / self.total_mass)
+        cos_theta, sin_theta = np.cos(theta), np.sin(theta)
+        x_dot_dot = ((force + self.pole_mass_length * theta_dot * theta_dot * sin_theta) -
+                     self.pole_mass_length * theta_dot_dot * cos_theta) / self.total_mass
         return x_dot_dot
 
     def step(self, action: int):
         assert self.action_space.contains(action), "%r (%s) invalid" % (action, type(action))
 
+        # action = 1
+
         x, x_dot, theta, theta_dot = self.state
 
         ######################################################################
-        # force = self.force if action == 1 else -self.force
         force = (action - 1) * 10
-        theta_dot_dot = self.theta_acc(theta, theta_dot, force)
-        # x_dot_dot = self.x_acc(theta, theta_dot, theta_dot_dot, force)
-        # x += + self.tau * x_dot
-        # x_dot += + self.tau * x_dot_dot
-        theta += + self.tau * theta_dot
-        theta_dot += + self.tau * theta_dot_dot
+        theta_dot_dot = self.theta_acc(x, theta, theta_dot, force)
+        # x_dot_dot = self.x_acc(theta, theta_dot, theta_dot_dot, (action - 1) * self.force)
+        # x += self.tau * x_dot
+        # x_dot += self.tau * x_dot_dot
+        # print('-----------------------------------------------------------------------')
+        # print(f'action = {action} => x_dot_dot = {x_dot_dot}, x_dot = {x_dot}, x = {x}')
+        # print(f'action = {action} => theta_dot_dot = {theta_dot_dot}, theta_dot = {theta_dot}, theta = {theta}')
+        theta += self.tau * theta_dot
+        theta_dot += self.tau * theta_dot_dot
         ######################################################################
 
-        x_dot += (action - 1) * self.force + math.cos(3 * x) * self.total_mass * (-self.gravity)
+        x_dot += (action - 1) * self.force + self.dheight(x) * self.total_mass * (-self.gravity)
         x_dot = np.clip(x_dot, -self.max_speed, self.max_speed)
         x += x_dot
         x = np.clip(x, self.min_position, self.max_position)
@@ -94,9 +102,8 @@ class MountainCarExtendedEnv(gym.Env):
         done = x >= self.goal_position and x_dot >= self.goal_velocity
         reward = -1.0
 
-        # theta_dot = np.random.uniform(low=-pi/30, high=pi/30)
-        # theta += theta_dot
-        # theta = np.clip(theta, self.min_theta, self.max_theta)
+        # x, x_dot, theta, theta_dot = x + 0.001, 0, 0, 0
+        # x, x_dot, theta, theta_dot = x + 0.02, 0, 0, 0
 
         self.state = (x, x_dot, theta, theta_dot)
         return np.array(self.state), reward, done, {}
@@ -106,21 +113,17 @@ class MountainCarExtendedEnv(gym.Env):
                                0,
                                self.np_random.uniform(low=-0.05, high=0.05),
                                self.np_random.uniform(low=-0.05, high=0.05)])
+        # self.state = np.array([-1.0, 0, 0, 0])
         return np.array(self.state)
 
-    def _height(self, xs):
-        return np.sin(3 * xs) * .45 + .55
-
     def render(self, mode='human'):
-        screen_width = 600
-        screen_height = 400
+        screen_width = 1200
+        screen_height = 800
 
         world_width = self.max_position - self.min_position
         scale = screen_width / world_width
-        car_width = 40
-        car_height = 20
 
-        pole_width = 10.0
+        pole_width = 20
         pole_length = scale * 2 * self.length
 
         if self.viewer is None:
@@ -128,8 +131,8 @@ class MountainCarExtendedEnv(gym.Env):
 
             self.viewer = rendering.Viewer(screen_width, screen_height)
 
-            xs = np.linspace(self.min_position, self.max_position, 100)
-            ys = self._height(xs)
+            xs = np.linspace(self.min_position, self.max_position, 2000)
+            ys = self.height(xs)
             xys = list(zip((xs - self.min_position) * scale, ys * scale))
 
             self.track = rendering.make_polyline(xys)
@@ -137,47 +140,68 @@ class MountainCarExtendedEnv(gym.Env):
             self.viewer.add_geom(self.track)
 
             clearance = 10
-            l, r, t, b = -car_width / 2, car_width / 2, car_height, 0
-            car = rendering.FilledPolygon([(l, b), (l, t), (r, t), (r, b)])
+            l, r, tmp, b = -self.car_width / 2, self.car_width / 2, self.car_height, 0
+            car = rendering.FilledPolygon([(l, b), (l, tmp), (r, tmp), (r, b)])
             car.add_attr(rendering.Transform(translation=(0, clearance)))
             self.car_trans = rendering.Transform()
             car.add_attr(self.car_trans)
             self.viewer.add_geom(car)
 
-            front_wheel = rendering.make_circle(car_height / 2.5)
-            front_wheel.set_color(.5, .5, .5)
-            front_wheel.add_attr(rendering.Transform(translation=(car_width / 4, clearance)))
+            front_wheel = rendering.make_circle(self.car_height / 2.5)
+            front_wheel.set_color(0.5, 0.5, 0.5)
+            front_wheel.add_attr(rendering.Transform(translation=(self.car_width / 4, clearance)))
             front_wheel.add_attr(self.car_trans)
             self.viewer.add_geom(front_wheel)
 
-            back_wheel = rendering.make_circle(car_height / 2.5)
-            back_wheel.add_attr(rendering.Transform(translation=(-car_width / 4, clearance)))
+            back_wheel = rendering.make_circle(self.car_height / 2.5)
+            back_wheel.add_attr(rendering.Transform(translation=(-self.car_width / 4, clearance)))
             back_wheel.add_attr(self.car_trans)
-            back_wheel.set_color(.5, .5, .5)
+            back_wheel.set_color(0.5, 0.5, 0.5)
             self.viewer.add_geom(back_wheel)
 
             flagx = (self.goal_position - self.min_position) * scale
-            flagy1 = self._height(self.goal_position) * scale
+            flagy1 = self.height(self.goal_position) * scale
             flagy2 = flagy1 + 50
             flagpole = rendering.Line((flagx, flagy1), (flagx, flagy2))
             self.viewer.add_geom(flagpole)
             flag = rendering.FilledPolygon([(flagx, flagy2), (flagx, flagy2 - 10), (flagx + 25, flagy2 - 5)])
-            flag.set_color(.8, .8, 0)
+            flag.set_color(0.8, 0.8, 0)
             self.viewer.add_geom(flag)
 
             ######################################################################
-            l, r, t, b = -pole_width / 2, pole_width / 2, pole_length - pole_width / 2, -pole_width / 2
-            pole = rendering.FilledPolygon([(l, b), (l, t), (r, t), (r, b)])
+            l, r, tmp, b = -pole_width / 2, pole_width / 2, pole_length - pole_width / 2, -pole_width / 2
+            pole = rendering.FilledPolygon([(l, b), (l, tmp), (r, tmp), (r, b)])
             pole.set_color(0.8, 0.6, 0.4)
-            self.pole_trans = rendering.Transform(translation=(0, clearance))
+            self.pole_trans = rendering.Transform(translation=(0, clearance + self.car_height / 2))
             pole.add_attr(self.pole_trans)
             pole.add_attr(self.car_trans)
             self.viewer.add_geom(pole)
+
+            # t_line = rendering.Line((-200, 0), (200, 0))
+            # t_line.set_color(0, 255, 0)
+            # self.t_line_trans = rendering.Transform()
+            # t_line.add_attr(self.t_line_trans)
+            # self.viewer.add_geom(t_line)
+
+            x_ax = rendering.Line((0, 0), (screen_width, 0))
+            y_ax = rendering.Line(((0.0 - self.min_position) / world_width * screen_width, 0),
+                                  ((0.0 - self.min_position) / world_width * screen_width, screen_height))
+            x_ax.set_color(255, 0, 0)
+            y_ax.set_color(255, 0, 0)
+            self.viewer.add_geom(x_ax)
+            self.viewer.add_geom(y_ax)
+
             ######################################################################
 
         pos = self.state[0]
-        self.car_trans.set_translation((pos - self.min_position) * scale, self._height(pos) * scale)
-        self.car_trans.set_rotation(math.cos(3 * pos))
+        self.car_trans.set_translation((pos - self.min_position) * scale, self.height(pos) * scale)
+        k = np.arctan(-1 / self.dheight(pos))
+        self.car_trans.set_rotation(pi / 2 + k if k < 0 else k - pi / 2)
+
+        # print(f'pos = {pos}, coeff = {-1 / dheight(pos)}, angle = {pi / 2 + np.arctan(-1 / dheight(pos))}')
+
+        # self.t_line_trans.set_translation((pos - self.min_position) * scale, _height(pos) * scale)
+        # self.t_line_trans.set_rotation(pi + np.arctan(- 1 / (1.35 * np.cos(3 * pos))))
 
         theta = self.state[2]
         self.pole_trans.set_rotation(theta)
