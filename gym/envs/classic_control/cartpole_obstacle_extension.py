@@ -9,82 +9,75 @@ from scipy.constants import g, pi
 from shapely.geometry import LineString
 
 
-class CartPoleExtendedEnv(gym.Env):
+class CartPoleObstacleExtendedEnv(gym.Env):
     metadata = {
         'render.modes': ['human', 'rgb_array'],
         'video.frames_per_second': 50
     }
 
     def __init__(self):
+        self.world_width, self.world_height = 4.8, 2.4
+
         self.gravity = g
         self.mass_cart = 1.0
         self.mass_pole = 0.1
         self.total_mass = (self.mass_pole + self.mass_cart)
-        self.length = 1.0  # actually half the pole's length
+        self.length = 0.5  # actually half the pole's length
         self.pole_mass_length = (self.mass_pole * self.length)
         self.force_mag = 10.0
         self.tau = 0.02  # seconds between state updates
 
-        # Angle at which to fail the episode
-        self.theta_threshold = pi / 6
-        self.x_threshold = 2.4
+        # self.theta_min, self.theta_max = -pi / 6, pi / 6
+        self.theta_min, self.theta_max = -12 * 2 * pi / 360, 12 * 2 * pi / 360
+        self.x_min, self.x_max = -self.world_width / 2, self.world_width / 2
 
-        # Angle limit set to 2 * theta_threshold_radians so failing observation is still within bounds
-        high = np.array([
-            self.x_threshold * 2,
-            np.finfo(np.float32).max,
-            self.theta_threshold * 2,
-            np.finfo(np.float32).max])
+        low = np.array([self.x_min * 2, -np.finfo(np.float32).max, self.theta_min * 2, -np.finfo(np.float32).max])
+        high = np.array([self.x_max * 2, np.finfo(np.float32).max, self.theta_max * 2, np.finfo(np.float32).max])
 
         self.action_space = spaces.Discrete(2)
-        self.observation_space = spaces.Box(-high, high, dtype=np.float64)
+        self.observation_space = spaces.Box(low, high, dtype=np.float64)
+
+        self.screen_width, self.screen_height = 1600, 800
+        self.scale = self.screen_width / self.world_width
 
         self.cart_y = 100
-
-        self.screen_width = 1200
-        self.screen_height = 800
-
         self.cart_width = 100.0
         self.cart_height = 60.0
         self.track_height = self.cart_y - self.cart_height / 2
 
-        self.world_width = self.x_threshold * 2
-        self.scale = self.screen_width / self.world_width
+        self.cart_y_world = self.cart_y / self.scale
+        self.cart_width_world = self.cart_width / self.scale
+        self.cart_height_world = self.cart_height / self.scale
+        self.track_height_world = self.track_height / self.scale
+
         self.pole_width = 20.0
         self.pole_length = self.scale * (2 * self.length)
-        self.obstacle_coordinates = [700, 1000,
-                                     self.track_height + self.cart_height + self.pole_length + 100,
-                                     self.track_height + self.cart_height + self.pole_length - 100]
+        self.obstacle_width, self.obstacle_height = self.screen_width / 5, self.screen_height / 5  # TODO: convert to world coordinates
+        self.obstacle_coordinates = [self.screen_width / 2 - self.obstacle_width / 2,
+                                     self.screen_width / 2 + self.obstacle_width / 2,
+                                     self.track_height + self.cart_height + self.pole_length + self.obstacle_height / 2,
+                                     self.track_height + self.cart_height + self.pole_length - self.obstacle_height / 2]
+
+        self.pole_length_world = self.pole_length / self.scale
+
+        self.goal_position_world = 2.0
 
         self.seed()
         self.viewer = None
         self.state, self.previous_state = None, None
 
-        self.steps_beyond_done = -1
+        self.already_done = False
+
+    def reset(self):
+        self.state = self.np_random.uniform(low=(-0.75, -0.05, -0.05, -0.05),
+                                            high=(-0.75, 0.05, 0.05, 0.05),
+                                            size=(4,))
+        self.already_done = False
+        return np.array(self.state)
 
     def seed(self, seed=None):
         self.np_random, seed = seeding.np_random(seed)
         return [seed]
-
-    def pole_obstacle_intersection(self):
-        l, r, t, b = self.obstacle_coordinates
-
-        x0, y0 = self.pole_top_coordinates(previous=True)
-        x1, y1 = self.pole_top_coordinates(previous=False)
-
-        f = lambda z: (y1 - y0) / (x1 - x0) * (z - x0) + y0
-        g = lambda z: (z - y0) * (x1 - x0) / (y1 - y0) + x0
-
-        if x0 < l <= x1 and b <= y1 <= t:
-            x, y = l, f(l)
-        elif x0 > r >= x1 and b <= y1 <= t:
-            x, y = r, f(r)
-        elif l <= x0 <= r and l <= x1 <= r and y0 < b <= y1:
-            x, y = g(b), b
-        else:
-            return None
-
-        return x, y
 
     def theta_acc(self, force):
         x, x_dot, theta, theta_dot = self.state
@@ -101,14 +94,41 @@ class CartPoleExtendedEnv(gym.Env):
                      self.pole_mass_length * theta_dot_dot * cos_theta / self.total_mass)
         return x_dot_dot
 
-    def pole_top_coordinates(self, previous=False):  # TODO: should be calculated from line?
+    def pole_top_coordinates(self, previous=False, screen_coordinates=True):
         x, x_dot, theta, theta_dot = self.state if not previous or self.previous_state is None else self.previous_state
-        return (x * self.scale + self.screen_width / 2.0 + self.pole_length * np.sin(theta),
-                self.track_height + self.cart_height + self.pole_length * np.cos(theta))
+        if screen_coordinates:
+            return (x * self.scale + self.screen_width / 2 + self.pole_length * np.sin(theta),
+                    self.track_height + self.cart_height + self.pole_length * np.cos(theta))
+        else:
+            return (x + self.pole_length_world * np.sin(theta),
+                    self.track_height_world + self.cart_height_world + self.pole_length_world * np.cos(theta))
 
-    def pole_bottom_coordinates(self, previous=False):
+    def pole_bottom_coordinates(self, previous=False, screen_coordinates=True):
         x, x_dot, theta, theta_dot = self.state if not previous or self.previous_state is None else self.previous_state
-        return x * self.scale + self.screen_width / 2.0, self.track_height + self.cart_height
+        if screen_coordinates:
+            return x * self.scale + self.screen_width / 2, self.track_height + self.cart_height
+        else:
+            return x, self.track_height_world + self.cart_height_world
+
+    def pole_obstacle_intersection(self):
+
+        x0, y0 = self.pole_top_coordinates(previous=True)
+        x1, y1 = self.pole_top_coordinates(previous=False)
+
+        f = lambda z: (y1 - y0) / (x1 - x0) * (z - x0) + y0
+        g = lambda z: (z - y0) * (x1 - x0) / (y1 - y0) + x0
+
+        l, r, t, b = self.obstacle_coordinates
+        if x0 < l <= x1 and b <= y1 <= t:
+            x, y = l, f(l)
+        elif x0 > r >= x1 and b <= y1 <= t:
+            x, y = r, f(r)
+        elif l <= x0 <= r and l <= x1 <= r and y0 < b <= y1:
+            x, y = g(b), b
+        else:
+            return None
+
+        return x, y
 
     def new_state(self, action):
 
@@ -149,7 +169,7 @@ class CartPoleExtendedEnv(gym.Env):
         theta += self.tau * theta_dot
         theta_dot += self.tau * theta_dot_dot
 
-        return x, x_dot, theta, theta_dot
+        return np.array([x, x_dot, theta, theta_dot])
 
     def step(self, action):
         assert self.action_space.contains(action), "%r (%s) invalid" % (action, type(action))
@@ -157,29 +177,25 @@ class CartPoleExtendedEnv(gym.Env):
         tmp_state = self.state
         x, x_dot, theta, theta_dot = self.new_state(action)
         self.state = (x, x_dot, theta, theta_dot)
-        self.previous_state = tuple(tmp_state)
+        self.previous_state = tmp_state
 
-        done = x < -self.x_threshold or x > self.x_threshold or not -self.theta_threshold <= theta <= self.theta_threshold
+        done = not self.x_min <= x <= self.x_max or not self.theta_min <= theta <= self.theta_max  # TODO: test
+
+        distance_from_goal = np.abs(x - self.goal_position_world)
 
         if not done:
-            reward = 1.0
-        elif self.steps_beyond_done == -1:
-            self.steps_beyond_done = 0
-            reward = 1.0
+            reward = np.exp2(-distance_from_goal)
+        elif not self.already_done:
+            self.already_done = True
+            reward = np.exp2(-distance_from_goal)
         else:
-            if self.steps_beyond_done == 0:
+            if self.already_done:
                 logger.warn('''You are calling 'step()' even though this environment has already returned done = True. 
                     You should always call 'reset()' once you receive 'done = True' 
                     -- any further steps are undefined behavior.''')
-            self.steps_beyond_done += 1
             reward = 0.0
 
         return np.array(self.state), reward, done, {}
-
-    def reset(self):
-        self.state = self.np_random.uniform(low=-0.05, high=0.05, size=(4,))
-        self.steps_beyond_done = -1
-        return np.array(self.state)
 
     def render(self, mode='human'):
 
@@ -225,9 +241,6 @@ class CartPoleExtendedEnv(gym.Env):
             self.pole_head.add_attr(self.pole_top_trans)
             self.viewer.add_geom(self.pole_head)
 
-            ll = rendering.Line((0.0, self.cart_y), (self.screen_width, self.cart_y))
-            self.viewer.add_geom(ll)
-
         if self.state is None:
             return None
 
@@ -236,8 +249,7 @@ class CartPoleExtendedEnv(gym.Env):
         pole_polygon.set_color(0.8, 0.6, 0.4)
         self.viewer.add_onetime(pole_polygon)
 
-        cart_x = x * self.scale + self.screen_width / 2.0
-        self.carttrans.set_translation(cart_x, self.cart_y)
+        self.carttrans.set_translation(x * self.scale + self.screen_width / 2, self.cart_y)
 
         pole_top = self.pole_top_coordinates()
         self.pole_top_trans.set_translation(*pole_top)
