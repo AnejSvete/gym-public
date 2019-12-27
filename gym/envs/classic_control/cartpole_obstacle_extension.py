@@ -71,13 +71,12 @@ class CartPoleObstacleExtendedEnv(gym.Env):
         self.viewer = None
         self.previous_state, self.state = None, None
 
-        self.already_done = False
+        self.times_at_goal = 0
 
     def reset(self):
         self.state = self.np_random.uniform(low=(-2.0, -0.05, -0.05, -0.05),
                                             high=(-1.75, 0.05, 0.05, 0.05),
                                             size=(4,))
-        self.already_done = False
         return np.array(self.state)
 
     def seed(self, seed=None):
@@ -229,13 +228,16 @@ class CartPoleObstacleExtendedEnv(gym.Env):
 
         return np.array([x, x_dot, theta, theta_dot])
 
-    def reward(self):
+    def reward(self, done):
         current_x, _, _, _ = self.state
         current_distance_from_goal = np.abs(current_x - self.goal_position_world)
-        previous_x, _, _, _ = self.previous_state
-        previous_distance_from_goal = np.abs(previous_x - self.goal_position_world)
-        distance_difference = previous_distance_from_goal - current_distance_from_goal
-        return np.exp2(distance_difference) if current_distance_from_goal < 0.1 * self.world_width else np.exp2(-current_distance_from_goal)
+        # previous_x, _, _, _ = self.previous_state
+        # previous_distance_from_goal = np.abs(previous_x - self.goal_position_world)
+        # distance_difference = previous_distance_from_goal - current_distance_from_goal
+        # return np.exp2(distance_difference) if current_distance_from_goal < 0.1 * self.world_width else np.exp2(-current_distance_from_goal)
+        # return distance_difference if current_distance_from_goal < 0.1 * self.world_width else np.power(0.5, -current_distance_from_goal)
+        # return self.world_width / (current_distance_from_goal + 1)
+        return self.times_at_goal if current_distance_from_goal < 0.1 * self.world_width else -1 if done else 0.0
 
     def step(self, action):
         assert self.action_space.contains(action), "%r (%s) invalid" % (action, type(action))
@@ -245,18 +247,16 @@ class CartPoleObstacleExtendedEnv(gym.Env):
         self.state = (x, x_dot, theta, theta_dot)
         self.previous_state = tmp_state
 
-        done = not self.x_min <= x <= self.x_max or not self.theta_min <= theta <= self.theta_max  # TODO: test
+        distance_from_goal = np.abs(x - self.goal_position_world)
 
-        reward = self.reward()
+        done = not self.x_min <= x <= self.x_max or not self.theta_min <= theta <= self.theta_max or self.times_at_goal >= 50
 
-        if done and not self.already_done:
-            self.already_done = True
-        elif done:
-            if self.already_done:
-                logger.warn('''You are calling 'step()' even though this environment has already returned done = True. 
-                    You should always call 'reset()' once you receive 'done = True' 
-                    -- any further steps are undefined behavior.''')
-            reward = 0.0
+        if distance_from_goal < 0.1 * self.world_width:
+            self.times_at_goal += 1
+        else:
+            self.times_at_goal = 0
+
+        reward = self.reward(done)
 
         return np.array(self.state), reward, done, {}
 
