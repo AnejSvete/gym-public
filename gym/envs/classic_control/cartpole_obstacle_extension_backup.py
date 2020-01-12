@@ -43,36 +43,27 @@ class CartPoleObstacleExtendedEnv(gym.Env):
         self.screen_width_pixels, self.screen_height_pixels = 1600, 800
         self.scale = self.screen_width_pixels / self.world_width
 
+        self.cart_y_pixels = 100
         self.cart_width_pixels = 100.0
         self.cart_height_pixels = 60.0
-        self.track_height_pixels = 50.0
-        self.wheels_radius = self.cart_height_pixels / 3
-        self.cart_middle_y_pixels = self.track_height_pixels + self.wheels_radius + self.cart_height_pixels / 2
-        self.cart_top_y_pixels = self.cart_middle_y_pixels + self.cart_height_pixels / 2
-        self.cart_bottom_y_pixels = self.cart_middle_y_pixels - self.cart_height_pixels / 2
+        self.track_height_pixels = self.cart_y_pixels - self.cart_height_pixels / 2
 
-        self.cart_middle_y = self.cart_middle_y_pixels / self.scale
-        self.cart_top_y = self.cart_top_y_pixels / self.scale
-        self.cart_bottom_y = self.cart_bottom_y_pixels / self.scale
+        self.cart_y = self.cart_y_pixels / self.scale
         self.cart_width = self.cart_width_pixels / self.scale
         self.cart_height = self.cart_height_pixels / self.scale
         self.track_height = self.track_height_pixels / self.scale
 
         self.pole_width_pixels = 20.0
         self.pole_length_pixels = self.scale * (2 * self.length)
-
-        self.pole_bottom_y_pixels = self.cart_top_y_pixels
-        self.pole_bottom_y = self.pole_bottom_y_pixels / self.scale
-
         self.obstacle_width_pixels, self.obstacle_height_pixels = self.screen_width_pixels / 5, self.screen_height_pixels / 5
         self.obstacle_coordinate_pixels = [self.screen_width_pixels / 2 - self.obstacle_width_pixels / 2,
                                            self.screen_width_pixels / 2 + self.obstacle_width_pixels / 2,
-                                           self.cart_top_y_pixels + self.pole_length_pixels + self.obstacle_height_pixels / 2 + 150,
-                                           self.cart_top_y_pixels + self.pole_length_pixels - self.obstacle_height_pixels / 2 + 150]
+                                           self.track_height_pixels + self.cart_height_pixels + self.pole_length_pixels + self.obstacle_height_pixels / 2 + 150,
+                                           self.track_height_pixels + self.cart_height_pixels + self.pole_length_pixels - self.obstacle_height_pixels / 2 + 150]
 
         self.pole_length = self.pole_length_pixels / self.scale
 
-        self.goal_position = 2.0
+        self.goal_position = 1.9
 
         self.intersection_polygon = None
 
@@ -112,7 +103,7 @@ class CartPoleObstacleExtendedEnv(gym.Env):
         theta = theta if provided_theta is None else provided_theta
         if screen_coordinates:
             return (x * self.scale + self.screen_width_pixels / 2 + self.pole_length_pixels * np.sin(theta),
-                    self.cart_top_y_pixels + self.pole_length_pixels * np.cos(theta))
+                    self.track_height_pixels + self.cart_height_pixels + self.pole_length_pixels * np.cos(theta))
         else:
             return (x + self.pole_length * np.sin(theta),
                     self.track_height + self.cart_height + self.pole_length * np.cos(theta))
@@ -120,9 +111,9 @@ class CartPoleObstacleExtendedEnv(gym.Env):
     def pole_bottom_coordinates(self, screen_coordinates=True):
         x, x_dot, theta, theta_dot = self.state
         if screen_coordinates:
-            return x * self.scale + self.screen_width_pixels / 2, self.pole_bottom_y_pixels
+            return x * self.scale + self.screen_width_pixels / 2, self.track_height_pixels + self.cart_height_pixels
         else:
-            return x, self.pole_bottom_y
+            return x, self.track_height + self.cart_height
 
     def pole_touches_obstacle(self):
 
@@ -276,6 +267,13 @@ class CartPoleObstacleExtendedEnv(gym.Env):
         if self.viewer is None:
             self.viewer = rendering.Viewer(self.screen_width_pixels, self.screen_height_pixels)
 
+            # cart
+            l, r, t, b = -self.cart_width_pixels / 2, self.cart_width_pixels / 2, self.cart_height_pixels / 2, -self.cart_height_pixels / 2
+            cart = rendering.FilledPolygon([(l, b), (l, t), (r, t), (r, b)])
+            self.cart_trans = rendering.Transform()
+            cart.add_attr(self.cart_trans)
+            self.viewer.add_geom(cart)
+
             # track / ground
             self.track = rendering.FilledPolygon([(0, 0),
                                                   (0, self.track_height_pixels),
@@ -284,65 +282,23 @@ class CartPoleObstacleExtendedEnv(gym.Env):
             self.track.set_color(0, 255, 0)
             self.viewer.add_geom(self.track)
 
-            # cart
-            l, r, t, b = -self.cart_width_pixels / 2, self.cart_width_pixels / 2, self.cart_height_pixels / 2, -self.cart_height_pixels / 2
-            cart = rendering.FilledPolygon([(l, b), (l, t), (r, t), (r, b)])
-            self.cart_trans = rendering.Transform()
-            cart.add_attr(self.cart_trans)
-            self.viewer.add_geom(cart)
-
-            # wheels
-            front_wheel = rendering.make_circle(self.wheels_radius)
-            front_wheel.set_color(0.5, 0.5, 0.5)
-            front_wheel.add_attr(rendering.Transform(translation=(self.cart_width_pixels / 4, -self.cart_height_pixels / 2)))
-            front_wheel.add_attr(self.cart_trans)
-            self.viewer.add_geom(front_wheel)
-            back_wheel = rendering.make_circle(self.cart_height_pixels / 3)
-            back_wheel.set_color(0.5, 0.5, 0.5)
-            back_wheel.add_attr(rendering.Transform(translation=(-self.cart_width_pixels / 4, -self.cart_height_pixels / 2)))
-            back_wheel.add_attr(self.cart_trans)
-            self.viewer.add_geom(back_wheel)
-
-            # pole
-            pole_line = LineString([(0, 0), (0, self.pole_length_pixels)]).buffer(self.pole_width_pixels / 2)
-            pole = rendering.make_polygon(list(pole_line.exterior.coords))
-            pole.set_color(0.8, 0.6, 0.4)
-            self.pole_trans = rendering.Transform(translation=(0, self.cart_height_pixels / 2))
-            pole.add_attr(self.pole_trans)
-            pole.add_attr(self.cart_trans)
-            self.viewer.add_geom(pole)
-
-            # axle
-            self.axle = rendering.make_circle(self.pole_width_pixels / 2)
-            self.axle.add_attr(self.pole_trans)
-            self.axle.add_attr(self.cart_trans)
-            self.axle.set_color(0.5, 0.5, 0.8)
-            self.viewer.add_geom(self.axle)
-
-            # flag
-            flag_x = (self.goal_position - self.x_min) * self.scale
-            flag_bottom_y = self.track_height_pixels
-            flag_top_y = flag_bottom_y + 200.0
-            flagpole = rendering.Line((flag_x, flag_bottom_y), (flag_x, flag_top_y))
-            self.viewer.add_geom(flagpole)
-            flag = rendering.FilledPolygon([(flag_x, flag_top_y), (flag_x, flag_top_y - 50), (flag_x + 100, flag_top_y - 30)])
-            flag.set_color(0.8, 0.8, 0)
-            self.viewer.add_geom(flag)
-
             # obstacle
             l, r, t, b = self.obstacle_coordinate_pixels
             obstacle = rendering.FilledPolygon([(l, b), (l, t), (r, t), (r, b)])
             obstacle.set_color(255, 0, 0)
             self.viewer.add_geom(obstacle)
 
+        pole = LineString([self.pole_bottom_coordinates(), self.pole_top_coordinates()]).buffer(self.pole_width_pixels / 2)
+        pole_polygon = rendering.FilledPolygon(list(pole.exterior.coords))
+        pole_polygon.set_color(0.8, 0.6, 0.4)
+        self.viewer.add_onetime(pole_polygon)
+
         if self.intersection_polygon is not None:
             intersection_polygon = rendering.FilledPolygon(list(self.intersection_polygon.exterior.coords))
             intersection_polygon.set_color(0.75, 0.75, 0.75)
             self.viewer.add_onetime(intersection_polygon)
 
-        self.cart_trans.set_translation(x * self.scale + self.screen_width_pixels / 2, self.cart_middle_y_pixels)
-
-        self.pole_trans.set_rotation(-theta)
+        self.cart_trans.set_translation(x * self.scale + self.screen_width_pixels / 2, self.cart_y_pixels)
 
         return self.viewer.render(return_rgb_array=mode == 'rgb_array')
 
