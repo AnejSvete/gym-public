@@ -111,6 +111,18 @@ register(
 )
 
 register(
+    id='CartPoleExtended-v3',
+    entry_point='gym.envs.classic_control:CartPoleEquationsEnv',
+    max_episode_steps=2000,
+)
+
+register(
+    id='CartPoleExtended-v4',
+    entry_point='gym.envs.classic_control:CartPoleHillEquationsEnv',
+    max_episode_steps=2000,
+)
+
+register(
     id='MountainCarExtended-v0',
     entry_point='gym.envs.classic_control:MountainCarExtendedEnv',
     max_episode_steps=10000,

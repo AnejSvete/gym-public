@@ -7,3 +7,5 @@ from gym.envs.classic_control.cartpole_obstacle_extension import CartPoleObstacl
 from gym.envs.classic_control.cartpole_environment_extension import CartPoleExtendedEnv
 from gym.envs.classic_control.cartpole_hill_extension import CartPoleHillExtendedEnv
 from gym.envs.classic_control.mountain_car_extension import MountainCarExtendedEnv
+from gym.envs.classic_control.cartpole_new_equations import CartPoleEquationsEnv
+from gym.envs.classic_control.cartpole_hill_equations import CartPoleHillEquationsEnv
